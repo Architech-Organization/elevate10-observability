@@ -1,0 +1,21 @@
+CREATE DATABASE IF NOT EXISTS mydb;
+
+USE mydb;
+
+CREATE TABLE IF NOT EXISTS mytable ( 
+  id INT NOT NULL AUTO_INCREMENT, 
+  text LONGTEXT NOT NULL, 
+  PRIMARY KEY (id) 
+);
+
+CREATE TABLE IF NOT EXISTS registrations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      firstName VARCHAR(255) NOT NULL,
+      lastName VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      eventName VARCHAR(255) NOT NULL,
+      createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+INSERT INTO mytable (text) VALUES("Test");

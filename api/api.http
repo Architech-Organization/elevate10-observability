@@ -1,0 +1,13 @@
+### test connection
+GET http://localhost:5001/
+
+### get events connection
+GET http://localhost:5001/get
+
+
+### create an event
+POST http://localhost:5001/create
+Content-Type: application/json
+
+ { firstName: 'a', lastName: 'a', email: 'a@a', eventName: 'a' }
+

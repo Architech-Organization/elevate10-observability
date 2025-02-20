@@ -1,0 +1,180 @@
+x-shared-api-service-env: &shared-api-service-env
+    SERVICE_NAME: api-service-1
+    API_SERVER_HOST: ${API_SERVER_HOST}
+    PORT: ${API_SERVER_INTERNAL_PORT}
+    REDIS_PASSWORD: ${REDIS_PASSWORD}
+    REDIS_HOST: ${REDIS_HOST}
+    REDIS_PORT: ${REDIS_PORT}
+    REDIS_CHANNEL: ${REDIS_CHANNEL}
+    MYSQL_HOST: ${MYSQL_HOST}
+    MYSQL_DATABASE: ${MYSQL_DATABASE}
+    MYSQL_USERNAME: ${MYSQL_USERNAME}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    MYSQL_TABLE: ${MYSQL_TABLE}
+    MYSQL_PORT: ${MYSQL_PORT}
+   
+
+x-shared-datadog-env: &shared-datadog-env
+    DD_ENV: development
+    DD_LOGS_INJECTION: true
+    DD_PROFILING_ENABLED: true
+    DD_APPSEC_ENABLED: true
+    DD_IAST_ENABLED: true
+    DD_APPSEC_SCA_ENABLED: true
+    DD_AGENT_HOST: "datadog-agent"
+    DD_TRACE_AGENT_PORT: 8126
+    DD_TRACE_SAMPLE_RATE: 1
+    #DD_TRACE_DEBUG: true
+
+services:
+  frontend-service:
+    container_name: "frontend-service"
+    build:
+      context: ./frontend/.
+      dockerfile: Dockerfile
+      args:
+      #  VITE_API_URL: ${FRONTEND_APP_HOST}/api //for external/standalong client
+        VITE_API_URL: ${VITE_API_URL}
+    environment:
+      <<: *shared-datadog-env
+      DD_SERVICE: frontend-service
+    ports:
+      - ${FRONTEND_APP_EXTERNAL_PORT}:${FRONTEND_APP_INTERNAL_PORT}
+    networks:
+      - backendNetwork
+    depends_on:
+      - api-service-1
+
+
+  api-service-1:
+    container_name: "api-service-1"
+    environment:
+      <<: [*shared-api-service-env, *shared-datadog-env]
+      DD_SERVICE: api-service-1
+    build:
+      context: ./api/.
+      dockerfile: Dockerfile
+    ports:
+      - ${API_SERVER_EXTERNAL_PORT}:${API_SERVER_INTERNAL_PORT}
+    networks:
+      - backendNetwork
+    depends_on:
+      - mysqldb
+      - redisCache
+  api-service-2:
+    container_name: "api-service-2"
+    environment:
+      <<: [*shared-api-service-env, *shared-datadog-env]
+      DD_SERVICE: api-service-2
+    build:
+      context: ./api/.
+      dockerfile: Dockerfile
+    networks:
+      - backendNetwork
+    depends_on:
+      - mysqldb
+      - redisCache
+
+  mysqldb:
+    container_name: "mysqldb"
+    build: ./db/.
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    ports:
+      - '3307:3306'
+    networks:
+      - backendNetwork
+    volumes:
+      - mysql-data:/var/lib/mysql
+    labels:
+      com.datadoghq.tags.env: "development"
+      com.datadoghq.tags.service: "mysql"
+      com.datadoghq.tags.version: 1
+      com.datadoghq.tags.app: "mysql"
+      com.datadoghq.ad.logs: '[{"source": "mysql", "service": "mysql"}]'
+      com.datadoghq.ad.check_names: '["mysql"]'
+      com.datadoghq.ad.init_configs: '[{}]'
+      com.datadoghq.ad.instances: '[{"host":"%%host%%","port":"3306","username":"root","password":"%%env_MYSQL_ROOT_PASSWORD%%"}]'
+
+
+  redisCache:
+    container_name: "redisCache"
+    image: "redis:latest"
+    restart: always
+    command: redis-server --save 20 1 --loglevel warning --requirepass mypassword --stop-writes-on-bgsave-error no
+    # ports:
+    #   - '6379:6379'
+    networks:
+      - backendNetwork
+    labels:
+      com.datadoghq.tags.env: "development"
+      com.datadoghq.tags.service: "redis"
+      com.datadoghq.tags.version: 1
+      com.datadoghq.tags.app: "redis"
+      com.datadoghq.ad.logs: '[{"source": "redis", "service": "redis"}]'
+      com.datadoghq.ad.check_names: '["redisdb"]'
+      com.datadoghq.ad.init_configs: '[{}]'
+      com.datadoghq.ad.instances: '[{"host":"%%host%%","port":"6379","password":"%%env_REDIS_PASSWORD%%"}]'
+
+
+  nginx:
+    container_name: nginx_server
+    # build:
+    #   context: ./nginx/.
+    #   dockerfile: Dockerfile
+    image: nginx:stable-alpine
+    ports:
+      - ${NGINX_EXTERNAL_PORT}:${NGINX_INTERNAL_PORT}
+    environment:
+      - FRONTEND_APP_HOST=${FRONTEND_APP_HOST}
+      - API_SERVER_HOST=${API_SERVER_HOST}
+      - FRONTEND_APP_EXTERNAL_PORT=${FRONTEND_APP_EXTERNAL_PORT}
+      - API_SERVER_EXTERNAL_PORT=${API_SERVER_EXTERNAL_PORT}
+      - FRONTEND_APP_INTERNAL_PORT=${FRONTEND_APP_INTERNAL_PORT}
+      - API_SERVER_INTERNAL_PORT=${API_SERVER_INTERNAL_PORT}
+    volumes:
+      - ./nginx/conf/nginx.conf.template:/etc/nginx/nginx.conf.template
+    command: /bin/sh -c "envsubst < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"
+    networks:
+      - backendNetwork
+    depends_on:
+      - frontend-service
+      - api-service-1
+    labels:
+      com.datadoghq.tags.env: "development"
+      com.datadoghq.tags.service: "nginx"
+      com.datadoghq.tags.app: "nginx"
+      com.datadoghq.ad.check_names: '["nginx"]'
+      com.datadoghq.ad.init_configs: '[{}]'
+      com.datadoghq.ad.instances: '[{"nginx_status_url": "http://%%host%%/status/"}]'
+      com.datadoghq.ad.logs: '[{"source": "nginx", "service": "nginx"}]'
+      
+  datadog-agent:
+    container_name: datadog-agent
+    image: datadog/agent:latest
+    restart: unless-stopped
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=${DD_SITE}
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_APM_ENABLED=true
+      - DD_APM_RECEIVER_SOCKET=/var/run/datadog/apm.socket
+      - DD_DOGSTATSD_SOCKET=/var/run/datadog/dsd.socket
+      - DD_LOGS_ENABLED=true
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    ports:
+      - "8125:8125/udp"
+      - "8126:8126/tcp"
+    networks:
+      - backendNetwork
+networks:
+  backendNetwork:
+    driver: bridge
+volumes:
+  mysql-data:
